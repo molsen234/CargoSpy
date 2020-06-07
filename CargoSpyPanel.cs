@@ -1,11 +1,7 @@
 ﻿using ColossalFramework.UI;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using ICities;
 using UnityEngine;
-using System.Runtime.CompilerServices;
 
 namespace CargoSpy
 {
@@ -27,27 +23,32 @@ namespace CargoSpy
             }
         }
 
-        public const float widthTruck = 60f;  //Width of truck column (coordinate with TruckListPanel)
+        public const float widthTruck = 60f;
         public const float widthAmount = 60f;
-        public const float widthSource = 230f;
-        public const float widthTarget = 230f;  // Sum to 600
+        public const float widthResource = 40f;
+        public const float widthSource = 205f;
+        public const float widthTarget = 205f;
+        public const float innerMargin = 5f;
 
         public byte m_selectedResource = 103;
+        public byte m_selectedResource2 = 0;
+        public ushort m_selectedBuilding = 0;
+        public bool m_hideTransit = false;
+        public string m_sortBy = "Truck";
+        public bool m_forceRefresh = false;
 
-        // Window Titlebar
-        private UIDragHandle tp_dragHandle;                     // These are set from Start() which
-        private UILabel tp_title;                               // is called from outside my
-        private UIButton tp_close;                              // namescope, hence appear unused.
-
-        // Line of controls such as cargo selection (checkmarks or dropdown?)
+        private UIDragHandle tp_dragHandle;
+        private UILabel tp_title;
+        private UIButton tp_close;
         private UIDropDown tp_dropCargo;
-
-        // Header of actual table
         private UIPanel tp_tableHeader;
         private UILabel tp_tableHeaderTruck;
         private UILabel tp_tableHeaderAmount;
+        private UILabel tp_tableHeaderResource;
         private UILabel tp_tableHeaderSourceB;
         private UILabel tp_tableHeaderTargetB;
+        private Color32 sortColor = new Color32(185, 221, 254, 255);
+        private Color32 headerColor = new Color32(255, 255, 255, 255);
 
         private UIFastList tp_truckList;
 
@@ -74,21 +75,15 @@ namespace CargoSpy
                 tp_dragHandle = CreateDragHandle(this);
                 tp_title = CreateTitle(this, "Cargo Spy");
                 tp_close = CreateCloseButton(this);
-
-                //tp_trucksTab = CreateTruckButton(this);
                 tp_dropCargo = CreateCargoDropDown(this);
-
-                CreateTableHeader(this);  // Method stores references, as there are multiple
+                CreateTableHeader(this);
 
                 tp_truckList = UIFastList.Create<CargoSpyTruckListItem>(this);
-
                 tp_truckList.width = 700f;
                 tp_truckList.rowHeight = 25f;
                 tp_truckList.relativePosition = new Vector3(26f, 125f);
                 tp_truckList.autoHideScrollbar = true;
 
-                // Probably let the data updater create the list items instead of attempting that here.
-                //  The vars are static anyway.
                 CargoSpyThreading.UpdateTruckTable();
                 RefreshTruckContainer();
             }
@@ -106,6 +101,12 @@ namespace CargoSpy
         }
         public void RefreshTruckContainer()
         {
+            if (m_sortBy == "Truck") CargoSpyThreading.TruckList.Sort((TruckItem x, TruckItem y) => x.vehicle.CompareTo(y.vehicle));
+            if (m_sortBy == "Amount") CargoSpyThreading.TruckList.Sort((TruckItem x, TruckItem y) => y.amount.CompareTo(x.amount));
+            if (m_sortBy == "Resource") CargoSpyThreading.TruckList.Sort((TruckItem x, TruckItem y) => x.resource.CompareTo(y.resource));
+            if (m_sortBy == "Source") CargoSpyThreading.TruckList.Sort((TruckItem x, TruckItem y) => x.source.CompareTo(y.source));
+            if (m_sortBy == "Target") CargoSpyThreading.TruckList.Sort((TruckItem x, TruckItem y) => x.target.CompareTo(y.target));
+
             tp_truckList.rowsData.m_buffer = CargoSpyThreading.TruckList.ToArray();
             tp_truckList.rowsData.m_size = tp_truckList.rowsData.m_buffer.Length;
             tp_truckList.height = Mathf.Min(tp_truckList.rowsData.m_size * tp_truckList.rowHeight, 500f);
@@ -117,7 +118,7 @@ namespace CargoSpy
             dropCargo.anchor = UIAnchorStyle.Top | UIAnchorStyle.Left;
             dropCargo.height = 30f;
             dropCargo.width = 250f;
-            dropCargo.relativePosition = new Vector3(20f, 20f);
+            dropCargo.relativePosition = new Vector3(25f, 59f);
             dropCargo.size = new Vector2(250f, 30f);
             dropCargo.listBackground = "GenericPanelLight";
             dropCargo.itemHeight = 30;
@@ -128,7 +129,7 @@ namespace CargoSpy
             dropCargo.hoveredBgSprite = "ButtonMenuHovered";
             dropCargo.focusedBgSprite = "ButtonMenu";
             dropCargo.listWidth = 250;
-            dropCargo.listHeight = 600;
+            dropCargo.listHeight = 720;
             dropCargo.foregroundSpriteMode = UIForegroundSpriteMode.Stretch;
             dropCargo.popupColor = new Color32(45, 52, 61, 255);
             dropCargo.popupTextColor = new Color32(170, 170, 170, 255);
@@ -162,12 +163,13 @@ namespace CargoSpy
                 button.size = t; dropCargo.listWidth = (int)t.x;
             });
 
-            Dictionary<string, byte> cargoTypes = new Dictionary<string, byte>
+            Dictionary<string, ushort> cargoTypes = new Dictionary<string, ushort>
             {
+                {"none", 255},
                 {"Oil", 13},
                 {"Ore", 14},
                 {"Logs", 15},
-                {"Grain", 16},
+                {"Crops", 16},     // Looks like it was called Grain before Industries DLC, but never displayed to user?
                 {"Goods", 17},
                 {"Coal", 19},
                 {"Petrol", 31},
@@ -182,16 +184,30 @@ namespace CargoSpy
                 {"Glass", 103},
                 {"Metals", 104},
                 {"LuxuryProducts", 105},
-                {"Fish", 108}
+                {"Fish", 108},
+                {"ZI-Oil", (13 << 8) + 31},      // 3359
+                {"ZI-Ore", (14 << 8) + 19},      // 3603
+                {"ZI-Forestry", (15 << 8) + 37}, // 3877
+                {"ZI-Farming", (16 << 8) + 32}   // 4128
             };
-            foreach (KeyValuePair<string, byte> kvp in cargoTypes)
+            foreach (KeyValuePair<string, ushort> kvp in cargoTypes)
             {
                 dropCargo.AddItem(kvp.Key);
             }
             dropCargo.eventSelectedIndexChanged += (c, e) =>
             {
-                cargoTypes.TryGetValue(dropCargo.selectedValue, out m_selectedResource);
-                CargoSpyThreading.UpdateTruckTable();
+                cargoTypes.TryGetValue(dropCargo.selectedValue, out ushort myResource);
+                if (myResource > 255)  // if top byte present
+                {
+                    m_selectedResource2 = (byte) ((myResource & 0xFF00)>>8); // Extract top byte
+                }
+                else
+                {
+                    m_selectedResource2 = 0;
+                }
+                m_selectedResource = (byte) (myResource & 0xFF); // Extract low byte
+                m_selectedBuilding = 0;
+                m_forceRefresh = true;
             };
             dropCargo.selectedIndex = 3;
             dropCargo.selectedValue = "Grain";
@@ -214,7 +230,17 @@ namespace CargoSpy
             tp_tableHeaderTruck.autoSize = false;
             tp_tableHeaderTruck.height = 23f;
             tp_tableHeaderTruck.width = widthTruck;
-            tp_tableHeaderTruck.relativePosition = new Vector3(5f, 2f);
+            tp_tableHeaderTruck.relativePosition = new Vector3(innerMargin, 2f);
+            tp_tableHeaderTruck.eventMouseDown += (component, eventParam) =>
+            {
+                m_sortBy = "Truck";
+                tp_tableHeaderTruck.textColor = sortColor;
+                tp_tableHeaderAmount.textColor = headerColor;
+                tp_tableHeaderResource.textColor = headerColor;
+                tp_tableHeaderSourceB.textColor = headerColor;
+                tp_tableHeaderTargetB.textColor = headerColor;
+                RefreshTruckContainer();
+            };
 
             tp_tableHeaderAmount = tp_tableHeader.AddUIComponent<UILabel>();
             tp_tableHeaderAmount.name = "TP_TableHeaderAmount";
@@ -224,7 +250,37 @@ namespace CargoSpy
             tp_tableHeaderAmount.autoSize = false;
             tp_tableHeaderAmount.height = 23f;
             tp_tableHeaderAmount.width = widthAmount;
-            tp_tableHeaderAmount.relativePosition = new Vector3(15f + 60f, 2f);
+            tp_tableHeaderAmount.relativePosition = new Vector3(innerMargin*3 + widthTruck, 2f);
+            tp_tableHeaderAmount.eventMouseDown += (component, eventParam) =>
+            {
+                m_sortBy = "Amount";
+                tp_tableHeaderTruck.textColor = headerColor;
+                tp_tableHeaderAmount.textColor = sortColor;
+                tp_tableHeaderResource.textColor = headerColor;
+                tp_tableHeaderSourceB.textColor = headerColor;
+                tp_tableHeaderTargetB.textColor = headerColor;
+                RefreshTruckContainer();
+            };
+
+            tp_tableHeaderResource = tp_tableHeader.AddUIComponent<UILabel>();
+            tp_tableHeaderResource.name = "TP_TableHeaderResource";
+            tp_tableHeaderResource.text = "Res.";
+            tp_tableHeaderResource.textAlignment = UIHorizontalAlignment.Right;
+            tp_tableHeaderResource.verticalAlignment = UIVerticalAlignment.Middle;
+            tp_tableHeaderResource.autoSize = false;
+            tp_tableHeaderResource.height = 23f;
+            tp_tableHeaderResource.width = widthResource;
+            tp_tableHeaderResource.relativePosition = new Vector3(innerMargin*5 + widthTruck + widthAmount, 2f);
+            tp_tableHeaderResource.eventMouseDown += (component, eventParam) =>
+            {
+                m_sortBy = "Resource";
+                tp_tableHeaderTruck.textColor = headerColor;
+                tp_tableHeaderAmount.textColor = headerColor;
+                tp_tableHeaderResource.textColor = sortColor;
+                tp_tableHeaderSourceB.textColor = headerColor;
+                tp_tableHeaderTargetB.textColor = headerColor;
+                RefreshTruckContainer();
+            };
 
             tp_tableHeaderSourceB = tp_tableHeader.AddUIComponent<UILabel>();
             tp_tableHeaderSourceB.name = "TP_TableHeaderSource";
@@ -234,7 +290,17 @@ namespace CargoSpy
             tp_tableHeaderSourceB.autoSize = false;
             tp_tableHeaderSourceB.height = 23f;
             tp_tableHeaderSourceB.width = widthSource;
-            tp_tableHeaderSourceB.relativePosition = new Vector3(25f + 60f + 60f, 2f);
+            tp_tableHeaderSourceB.relativePosition = new Vector3(innerMargin*7 + widthTruck + widthAmount + widthResource, 2f);
+            tp_tableHeaderSourceB.eventMouseDown += (component, eventParam) =>
+            {
+                m_sortBy = "Source";
+                tp_tableHeaderTruck.textColor = headerColor;
+                tp_tableHeaderAmount.textColor = headerColor;
+                tp_tableHeaderResource.textColor = headerColor;
+                tp_tableHeaderSourceB.textColor = sortColor;
+                tp_tableHeaderTargetB.textColor = headerColor;
+                RefreshTruckContainer();
+            };
 
             tp_tableHeaderTargetB = tp_tableHeader.AddUIComponent<UILabel>();
             tp_tableHeaderTargetB.name = "TP_TableHeaderTarget";
@@ -244,8 +310,17 @@ namespace CargoSpy
             tp_tableHeaderTargetB.autoSize = false;
             tp_tableHeaderTargetB.height = 23f;
             tp_tableHeaderTargetB.width = widthTarget;
-            tp_tableHeaderTargetB.relativePosition = new Vector3(35f + 60f + 60f + 230f, 2f);
-            
+            tp_tableHeaderTargetB.relativePosition = new Vector3(innerMargin*9 + widthTruck + widthAmount + widthResource + widthSource, 2f);
+            tp_tableHeaderTargetB.eventMouseDown += (component, eventParam) =>
+            {
+                m_sortBy = "Target";
+                tp_tableHeaderTruck.textColor = headerColor;
+                tp_tableHeaderAmount.textColor = headerColor;
+                tp_tableHeaderResource.textColor = headerColor;
+                tp_tableHeaderSourceB.textColor = headerColor;
+                tp_tableHeaderTargetB.textColor = sortColor;
+                RefreshTruckContainer();
+            };
             // Add panel here to contain the list. 
         }
 
@@ -257,7 +332,6 @@ namespace CargoSpy
             dragHandle.height = 40f;
             dragHandle.relativePosition = Vector3.zero;
             dragHandle.target = parent;
-
             return dragHandle;
         }
         private UILabel CreateTitle(UIComponent parent, string title)
@@ -267,50 +341,34 @@ namespace CargoSpy
             label.text = title;
             label.textAlignment = UIHorizontalAlignment.Center;
             label.relativePosition = new Vector3(parent.width / 2f - label.width / 2f, 11f);
-
             return label;
-
         }
         private UIButton CreateCloseButton(UIComponent parent)
         {
             UIButton button = parent.AddUIComponent<UIButton>();
             button.name = "CloseButton";
             button.relativePosition = new Vector3(parent.width - 37f, 2f);
-
             button.normalBgSprite = "buttonclose";
             button.hoveredBgSprite = "buttonclosehover";
             button.pressedBgSprite = "buttonclosepressed";
-
             button.eventClick += (component, eventParam) =>
             {
                 parent.Hide();
             };
-
             return button;
-
         }
         public void DestroyAll()
         {
-            // Destroy created components. Might need to add comps to list during creation, or store in vars
-            // in case we get called half way through construction process.
-            // For now assume we never need to destroy anything :)
-            // Order:
-
-            //ClearTruckTable();
-
-            Destroy(tp_dropCargo.gameObject);
             Destroy(tp_tableHeaderTargetB.gameObject);
             Destroy(tp_tableHeaderSourceB.gameObject);
+            Destroy(tp_tableHeaderResource.gameObject);
             Destroy(tp_tableHeaderAmount.gameObject);
             Destroy(tp_tableHeaderTruck.gameObject);
             Destroy(tp_tableHeader.gameObject);
+            Destroy(tp_dropCargo.gameObject);
             Destroy(tp_dragHandle.gameObject);
             Destroy(tp_title.gameObject);
             Destroy(tp_close.gameObject);
-
         }
-
-
     }
-
 }

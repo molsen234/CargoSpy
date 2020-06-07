@@ -1,5 +1,4 @@
 ﻿using ICities;
-using UnityEngine;
 
 namespace CargoSpy
 {
@@ -28,7 +27,6 @@ namespace CargoSpy
             }
         }
     }
-
     public class CargoSpyLoading : LoadingExtensionBase
     {
         private LoadMode _mode;
@@ -36,7 +34,7 @@ namespace CargoSpy
         {
             if (mode != LoadMode.NewGame && mode != LoadMode.LoadGame && mode != LoadMode.NewGameFromScenario) return;
             _mode = mode;  // Save mode, as it is not passed to OnLevelUnLoading() below
-            // Now set up your stuff
+            // Now set up your stuff - possibly from cofig file
             //TruckPanel.Initialize();
             //TruckPanel.Instance.myRefreshInterval = 3f;
             //TruckPanel.Instance.UpdateTruckTable();
